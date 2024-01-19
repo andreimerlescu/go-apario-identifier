@@ -1,0 +1,7 @@
+.idea
+.git
+.svn
+.log
+._*
+*.log
+.DS_Store
