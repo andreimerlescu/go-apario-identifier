@@ -243,9 +243,12 @@ func (v *Valet) NextID(databasePath string) (*Identifier, error) {
 		return v.NewID(databasePath, 6)
 	}
 
-	_, identifierDir, idErr := c.EnsureIdentifierDirectory(identifier.String())
-	if idErr != nil {
-		return nil, idErr
+	identifierDir := filepath.Join(c.Path, identifier.Path())
+	if !c.PathExists(identifierDir) {
+		mkdirErr := os.MkdirAll(identifierDir, 0700)
+		if mkdirErr != nil {
+			return nil, mkdirErr
+		}
 	}
 
 	identifierPath := filepath.Join(identifierDir, ".identifier")
@@ -280,7 +283,6 @@ func (v *Valet) NewID(databasePath string, length int) (*Identifier, error) {
 	m.RUnlock()
 	s.Release()
 	return id, nil
-
 }
 
 func (v *Valet) Scan() error {

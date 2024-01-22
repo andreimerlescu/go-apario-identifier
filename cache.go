@@ -35,7 +35,6 @@ func (c *Cache) LockIdentifier(identifier string) (err error) {
 	defer func() {
 		r := recover()
 		if r == nil {
-			err = nil
 			return
 		}
 		var wasErr bool
@@ -66,14 +65,11 @@ func (c *Cache) LockIdentifier(identifier string) (err error) {
 				breakMe = true
 				break
 			}
-			lockedAt := time.Unix(i, 0)
-			if lockedAt.After(time.Now().UTC()) {
-				breakMe = true
-				break
-			}
-			if attempts.Load() > 30 {
-				// 900ms elapsed
-				return errors.New(".locked file present and failed to unlock within timeout")
+			if i > 0 {
+				if attempts.Load() > 30 {
+					err = errors.New(".locked file present and failed to unlock within timeout")
+					return
+				}
 			}
 
 		}
@@ -110,7 +106,9 @@ func (c *Cache) EnsureIdentifierMutex(identifier string) (mu *sync.RWMutex) {
 		if readErr == nil {
 			if time.Now().UTC().After(lockedAt) {
 				// locked in the past, aka still actively locked
-				mu.Lock()
+				if mu.TryLock() {
+					mu.Lock()
+				}
 			}
 		}
 	}

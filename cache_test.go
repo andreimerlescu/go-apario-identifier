@@ -54,7 +54,7 @@ func TestCache_LockIdentifier(t *testing.T) {
 
 	expectErr := cache.LockIdentifier(id.String())
 	if expectErr == nil {
-		t.Errorf("expected error to trigger for %v", expectErr)
+		t.Errorf("expected error to trigger for %v", id.String())
 		return
 	} else {
 		log.Printf("successfully verified that id %v is locked since expectErr = %v", id.String(), expectErr)

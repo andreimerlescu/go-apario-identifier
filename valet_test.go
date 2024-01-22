@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewValet(t *testing.T) {
-	db, err := os.MkdirTemp("", "users.db")
+	db, err := os.MkdirTemp("", "users2.db")
 	if err != nil {
 		t.Errorf("os.MkdirTemp() received err %v", err)
 		return
