@@ -62,19 +62,11 @@ func generateIdentifier(databasePrefixPath string, length int, attempts int) (*I
 	if cacheErr != nil {
 		return nil, cacheErr
 	}
-	defer func() {
-		err := cache.Write(identifier, 1)
-		if err != nil {
-			log.Printf("failed to cache.Write(%v, 1) due to err %v", identifier, err)
-			return
-		}
-	}()
 	attemptedIdentifier, attemptErr := newToken(length, attempts)
 	if attemptErr != nil {
 		return nil, attemptErr
 	}
-	identifier = attemptedIdentifier.String()
-	identifierPath := IdentifierPath(identifier)
+	identifierPath := IdentifierPath(attemptedIdentifier.String())
 	path := filepath.Join(databasePrefixPath, identifierPath)
 	_, infoErr := os.Stat(path)
 	if infoErr != nil {
@@ -83,7 +75,12 @@ func generateIdentifier(databasePrefixPath string, length int, attempts int) (*I
 		if err != nil {
 			return nil, err
 		}
-		return ParseIdentifier(identifier)
+		err = cache.Write(attemptedIdentifier.String(), 1)
+		if err != nil {
+			log.Printf("failed to cache.Write(%v, 1) due to err %v", identifier, err)
+			return nil, err
+		}
+		return attemptedIdentifier, nil
 	} else {
 		log.Printf("[retrying] identifier exists at path: %v", path)
 		attempts += 1

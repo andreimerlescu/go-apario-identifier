@@ -1,15 +1,130 @@
 # Apario Identifier
 
-This package is responsible for interacting with Apario Identifiers for the Reader/Writer/Database apps.
+This package aims to simplify the use of identifiers in the Project Apario workspace. This package is pretty generic
+but was built specifically for the Project Apario database, but technically could be applied to any other type of
+application that needs this specific use case.
+
+The database for Project Apario's reader application is a filesystem directory based database that leverages the
+directory tree structure of the operating system to use a breadth vs depth approach to storing unique identifiers
+as directories within the tree of the filesystem.
+
+An `Identifier` type in this package is a struct that contains a Year `int` and a Fragment `[]rune`. The fragment is
+presented and stored in Base36, which is effectively a slice of possible char values ranging from A-Z or 0-9 (total of
+36 elements in that, therefore base36 identifier fragment with the year).
+
+The year is used to quarantine on the disk writes based on a given year. For example, all of 2024's data would be
+inside a directory called 2024. Likewise, 2025 would be inside 2025. Once 2024 is written, new entries will not be
+created by the application to store new data, however updates may still be written by the application to previous
+year directories. If a previous year directory is a read-only filesystem, then proposals and updates are disabled.
+
+```go
+type Fragment []rune
+type Identifier struct {
+  Year int `json:"y"`
+  Fragment Fragment `json:"f"`
+}
+```
+
+There are methods associated to the `Identifier` type that are:
+
+```go
+func (i *Identifier) Identifier() *Identifier
+func (i *Identifier) ID() string
+func (i *Identifier) Path() string
+func (i *Identifier) String() string
+```
+
+The methods `.ID()` and `.String()` are identical. The `.String()` method implements the strings.Stringer interface and
+the `.Path()` will convert the `.String()` value into a fibonacci split up path based on the length of the identifier's
+Fragment section. Ultimately, can the length of the Fragment fit inside n-fibonacci sums?
+
+For example:
+
+```go
+fragment := CodeFragment("abcdef")
+id, idErr := identifier := fragment.ToIdentifier()
+if idErr == nil {
+  log.Println(id.Path()) // prints 2024/a/b/cd/ef
+}
+```
+
+Raw identifiers can be used, however its better to use wrapped identifiers or counter identifiers for a given
+database directory. Given that this package is designed for an Apario database, its important to understand
+how this database was written and why.
+
+Most important concept: indexing the database should only take place against unique identifiers only as the
+real way of interacting with the substance of the database should only be through the Textee interface, which
+will use this identifier package to convert the 3 gematria values for a substring and then store those values
+in their corresponding `[]rune()` representation of each of the gematria display digits. For example, the gematria
+value for 1602 would be `[]rune{rune("1"), rune("6"), rune("0"), rune("2")}`.
+
+## Cache
+
+There is a cache that is maintained on a watched database directory that keeps track of each unique identifier
+interacted with a given valet that gives quick and easy access to a semaphore and a RW mutex that can be used
+by other parts of an application when actions are taking place inside the database itself.
+
+```go
+type Cache struct {
+	ctx        context.Context
+	Path       string                    `json:"-"`
+	Mutexes    map[string]*sync.RWMutex  `json:"-"`
+	Semaphores map[string]sema.Semaphore `json:"-"`
+	muMu       *sync.RWMutex
+	muSe       *sync.RWMutex
+}
+```
+
+Methods attached to the `Cache` type:
+
+```go
+func (c *Cache) PathExists(path string) bool
+func (c *Cache) LockIdentifier(identifier string) (err error)
+func (c *Cache) EnsureIdentifierMutex(identifier string) (mu *sync.RWMutex)
+func (c *Cache) EnsureIdentifierSemaphore(identifier string) (s sema.Semaphore)
+func (c *Cache) EnsureIdentifier(identifier string)
+func (c *Cache) EnsureIdentifierDirectory(identifier string) (*Identifier, string, error)
+func (c *Cache) UnlockIdentifier(identifier string)
+func (c *Cache) IdentifierCheck(identifier string) error
+func (c *Cache) SafetyCheck()
+func (c *Cache) Write(identifier string, limit int) (err error)
+func (c *Cache) Semaphore(identifier string) sema.Semaphore
+func (c *Cache) S(identifier string) sema.Semaphore
+func (c *Cache) Mutex(identifier string) *sync.RWMutex
+func (c *Cache) M(identifier string) *sync.RWMutex
+func (c *Cache) LoadDatabase(databasePath string) error
+```
+
+Non-exporter functions are:
+
+```go
+func (c *Cache) readInt64File(identifier string, filename string) (int64, error)
+func (c *Cache) writeInt64File(identifier string, filename string, value int64) error
+func (c *Cache) readTimestampFile(identifier string, filename string) (time.Time, error)
+func (c *Cache) writeTimestampFile(identifier string, filename string, timestamp time.Time) error
+func (c *Cache) identifierLockFile(identifier string) string
+func (c *Cache) removeLockFile(identifier string) bool
+```
 
 ## Valet
 
-### Functions
-
-This is `Valet`...
+The Valet is an interface that makes working with Identifiers and Caches easy to use. A Valet is also able
+to keep track of multiple "databases", thus making each directory that is provided as a "database" in essence
+a "table" but its important not to use those terms when discussing WHAT the entry is.
 
 ```go
+type Valet struct {
+	ctx       context.Context
+	Databases map[string]*Cache `json:"-"`
+	mu        *sync.RWMutex
+	lim       int
+}
+```
 
+Method attached to the Valet structure:
+
+```go
+func NewValetWithContext(ctx context.Context, databasePath string) *Valet
 func NewValet(databasePath string) *Valet
 func (v *Valet) GetCache(databasePrefix string) (*Cache, error)
 func (v *Valet) SetCache(databasePrefix string, identifier string) (*Cache, error)
@@ -18,300 +133,118 @@ func (v *Valet) Unlock(databasePrefix string, identifier string)
 func (v *Valet) Acquire(databasePrefix string, identifier string)
 func (v *Valet) Release(databasePrefix string, identifier string)
 func (v *Valet) SafetyCheck()
+func (v *Valet) NewCountableDatabase(databasePath string) error
+func (v *Valet) IsCountableDatabase(databasePath string) bool
+func (v *Valet) LastID(databasePath string) (*Identifier, error)
+func (v *Valet) NextID(databasePath string) (*Identifier, error)
 func (v *Valet) NewID(databasePath string, length int) (*Identifier, error)
 func (v *Valet) Scan() error
+func (v *Valet) PathExists(path string) bool
 ```
 
-The `Valet` structure is very simple.
+## Testing
 
-```go
-type Valet struct {
-	Databases map[string]*Cache `json:"-"`
-	mu        *sync.RWMutex
-	lim       int
-}
+This package has nearly 100% code coverage associated with the functions offered throughout this package and the best
+example of seeing the application is actually within the tests. To test the application:
+
+
+```sh
+mkdir -p ~/workspace
+cd ~/workspace
+git clone github.com/andreimerlescu/go-apario-identifier
+cd go-apario-identifier
+go test ./...
 ```
 
-This creates a map of paths that are called databasePrefix have many identifiers inside of them. The Cache is the
-referenced structure. Inside this code:
+## Valet Example
 
+The test has the same code, but for documentation purposes you can see what the Valet does with comments:
 
-```go
-type Cache struct {
-	Mutexes    map[string]*sync.RWMutex  `json:"-"`
-	Semaphores map[string]sema.Semaphore `json:"-"`
-	muMu       *sync.RWMutex
-	muSe       *sync.RWMutex
-}
-```
+This test does the following:
 
-This gives us an interface to use the `string` value in the `map` for `Mutexes` to be the `identifier` of the record
-belonging to the valeted' database. The mutexes are used to provide thread safe maps. But the maps connect `identifier`
-types of data to a locker mutex and a semaphore that can be customized with the
+1. Creates a temp directory called `users.db`
+2. Creates a new `Valet` to track `users.db`
+3. Ensures that Semaphores and Mutexes within Valet's Cache is defined
+4. Establishes a new `.lastid` inside directory `users.db` with the value of `int64(1)` inside the file
+5. Reference the Valet's Cache directly
+6. Ask for a new `*Identifier` by running `.NextID()` and since its a countable database with a `.lastid`, it stores (value of .lastid)+=1 into .lastid and returns the identifier
+7. Lock the identifier's directory (so something can happen inside the identifiers' directory, such as writing the identifier's json data)
+8. Check that the `.locked` file exists in the identifiers' directory.
+9. Try to lock a locked identifiers - this will return an error as expected
+10. Unlock the identifier's directory.
+11. Verify that .locked does not exist in an unlocked identifier directory
+12. Get the next ID in the set reading from `.lastid` (in this case == 2) where nextID = now 2024[base36(2)]
+13. Get the next ID in the set
+14. Get the next ID in the set
 
-### Using the Valet
-
-```go
-package main
-
-import (
-  `fmt`
-
-  ai `github.com/andreimerlescu/go-apario-identifier`
-)
-
-func main(){
-  db, _ := os.MkdirTemp("", "users.db")
-	v := NewValet(db)
-	err := v.Scan()
-	if err != nil {
-		log.Printf("failed to scan valet database directory %v due to err %v", db, err)
-		return
-	}
-
-	c, cErr := v.GetCache(db)
-	if cErr != nil {
-		log.Printf("failed to scan valet cache directory %v due to err %v", db, cErr)
-		return
-	}
-
-	// new id
-	id, idErr := v.NewID(db, 6)
-	if idErr != nil {
-		log.Printf("failed to get new ID for database %v due to err %v", db, idErr)
-		return
-	}
-
-	// account.json inside id path
-	identifierDataDir := filepath.Join(db, id.Path())
-	accountFile := filepath.Join(identifierDataDir, "account.json")
-
-	// read the file
-	c.S(identifierDataDir).Acquire()                   // allowed to access identifier directory?
-	c.M(identifierDataDir).Lock()                      // can access?
-	c.S(accountFile).Acquire()                         // allowed to access file?
-	c.M(accountFile).RLock()                           // read lock
-	accountBytes, bytesErr := os.ReadFile(accountFile) // read json file
-	c.M(accountFile).RUnlock()                         // read unlock
-	c.S(accountFile).Release()                         // done with accountFile
-	c.M(identifierDataDir).Unlock()                    // done with directory
-	c.S(identifierDataDir).Release()                   // allow next task
-	if bytesErr != nil {
-		if errors.Is(bytesErr, os.ErrNotExist) {
-			// no such file
-		}
-		// other issue
-	}
-
-	// write to a file
-	err = c.LockPath(identifierDataDir)
-	if err != nil {
-		log.Printf("error %v locking path %v", err, accountFile)
-	}
-	err = c.LockPath(accountFile)
-	if err != nil {
-		log.Printf("error %v locking path %v", err, accountFile)
-	}
-	err = os.WriteFile(accountFile, accountBytes, 0600)
-	c.UnlockPath(accountFile)
-	c.UnlockPath(identifierDataDir)
-	if err != nil {
-		return
-	}
-
-	// if you didnt want to muck with the directory at all, but just the file itself
-	err = c.LockPath(accountFile)
-	if err != nil {
-		log.Printf("received err %v", err)
-	}
-	err = os.WriteFile(accountFile, accountBytes, 0600)
-	c.UnlockPath(accountFile)
-	if err != nil {
-		log.Printf("failed to write to file %v due to err %v", accountFile, err)
-	}
-}
-
-```
-
-
-## Functions
-
-0. `NewID(databasePath string, length int) (ID, error)`
-
-This func will provide an interface for the Identifier. The Identifier will have a Year + Code associated to it. This
-allows identifiers to have a prefix that allows for better time-series archival purposes.
+Inside each directory where an identifier actually exists, a `.identifier` file will be created with the value of the
+identifier inside it. This can be used for the purposes of taking the value of the `.identifier` file and checking it
+against the current path of the current directory where `.identifier` exists. If the `.Path()` value of that
+`.identifier` value through `ParseIdentifier()` does not match, then it means the directory is being used for another
+identifier and THAT directory belongs to `.identifier` for its data.
 
 ```go
-package main
-
-import (
-  `fmt`
-  `os`
-
-  id `github.com/andreimerlescu/go-apario-identifier`
-)
-
-func main() {
-  dir, dirErr := os.MkdirTemp("", "db")
-  if dirErr != nil {
-    panic(dirErr)
-  }
-  id, err := NewID(dir, 6)
+db, err := os.MkdirTemp("", "users.db")
+defer func(path string) {
+  err := os.RemoveAll(path)
   if err != nil {
-    panic(err)
+    log.Printf("os.RemoveAll(%v) returned err %v", path, err)
   }
-  fmt.Printf(id)
+}(db)
+if err != nil {
+  t.Errorf("os.MkdirTemp() received err %v", err)
+  return
 }
+valet := NewValet(db)
+valet.SafetyCheck()
+
+err = valet.NewCountableDatabase(db)
+// handle err
+
+cache, cacheErr := valet.GetCache(db)
+// handle err
+
+id, idErr := valet.NextID(db) // since valet.NewCountableDatabase; id == YYYY[base36(1)]
+// handle err
+// id == *Identifier
+
+err = cache.LockIdentifier(id.String()) // places a .locked file inside db/id.Path()
+// handle err
+
+fileExists := cache.PathExists(filepath.Join(db, id.Path(), ".locked")) // does file exist as it should?
+// do something with the bool
+
+expectErr := cache.LockIdentifier(id.String()) // try to lock the file while already locked, returns err here
+// handle error
+
+cache.UnlockIdentifier(id.String()) // removes the .locked file and updates the RWMutex for the identifier
+// no response of any type
+
+fileExists = cache.PathExists(filepath.Join(db, id.Path(), ".locked")) // after Unlock no such file will exist here
+// do something with the updated bool
+
+nextId, nextIdErr := valet.NextID(db) // since countable database, .NextID adds 1 to the db/.lastid file ; therefore now = 2
+// handle error
+// nextId is an increment above id + 1
+
+// reflect.DeepEqual(nextId.Fragment, CodeFragment("2")) // are they exact matches?
+// validate the fragments match
+
+nextId, nextIdErr = valet.NextID(db) // since countable database, .NextID adds 1 to the db/.lastid file ; therefore now = 3
+// handle error
+// nextId is an increment above nextId + 1
+
+// reflect.DeepEqual(nextId.Fragment, CodeFragment("3")) // are they an exact match?
+// validate the fragment match
+
+nextId, nextIdErr = valet.NextID(db) // since countable database, .NextID adds 1 to db/.lastid file ; therefore now = 4
+// handle error
+// nextId is an increment above nextId + 1
+
+// reflect.DeepEqual(nextId.Fragment, CodeFragment("4")) // are they an equal match
+// validate the fragment match
 ```
 
-This will create a new temp directory that contains a fibonacci sequence of subdirectories that correspond to the unique
-identifier that was provided. Inside this folder, you can put things that need to be indexed as such. You can create
-many interfaces into the data from within this directory using this structure.
-
-
-1. `IdentifierPath(identifier string) string`
-
-This func will convert a identifier into a path that uses fibonacci to introduce depth from the breadth of the path.
-Additionally it uses the fibonacci sequence of the identifier's char positions. A 6 digit long code will have chars
-between A-Z0-9 only. An example of that could be `ABC123` as the identifier. This identifier has a special interface{}
-attached to it called ID that implements Identification. The `Path()` function will take the identifier and generate a
-path `2023/a/b/c1/23` for the `ABC123` identifier of 6 chars long.
-
-Example:
-
-```go
-package main
-
-import (
-  `fmt`
-  `os`
-
-   id `github.com/andreimerlescu/go-apario-identifier`
-)
-
-func main() {
-  identifier := "2023ABCDEFG"
-  path, err := id.IdentifierPath(identifier)
-  if err != nil {
-    fmt.Printf("failed to calculate identifier %v due to err %v\n", identifier, err)
-    os.Exit(1)
-  }
-  fmt.Printf("done processing\n\nidentifier = %v\npath = %v\n", identifier, path)
-  // path = 2023/A/B/CD/EFG
-}
-```
-
-2. `NewIdentifier(databasePrefixPath string, identifierLength int, attemptsCounter int, timeoutSeconds int) (*Identifier, error)`
-
-This func allows you to bypass the interface called Identification and the NewID response type by getting an instance of
-`*Identifier` back instead of an `ID` which is an `Identification` interface implementation. This distinction means the
-accessors of private functions can be acquired without first calling `.Instance()` on the `ID` type.
-
-3. `ParseIdentifier(identifier string) (*Identifier, error)`
-
-This func will take a string value of an identifier and return the *Identifier type. If the input string fails to
-validate as an identifier, an error is returned.
-
-## Index Uses
-
-This package can manage the `&sync.RWMutex{}` values for each identifier that is ingested into the package. For instance,
-you can do this:
-
-```go
-package main
-
-import (
-  `fmt`
-  `os`
-
-  ai `github.com/andreimerlescu/go-apario-identifier`
-)
-
-func main() {
-  db, err := os.MkdirTemp("", "users.db")
-  if err != nil {
-    panic(err)
-  }
-
-  id, idErr := ai.NewID(db, 6) // 6 chars long for the code
-  if idErr != nil {
-    panic(idErr)
-  }
-
-  err = id.Lock()
-  if err != nil {
-    panic(err)
-  }
-  time.Sleep(100*time.Millisecond) // perform a task against this indexed value, such as modifying a file inside the dir
-  id.Unlock()
-
-  id.RLock()
-  time.Sleep(time.Millisecond)
-  id.RUnlock()
-}
-```
-
-This lock/unlock capability can be utilized throughout the application.
-
-## Semaphores
-
-Each database path provided as the first argument to many functions within this package will each have a 1 length
-buffered channel called a semaphore that will be used when Locking and Unlocking an identifier's access. By making
-it a semaphore, its a first in first out action on any unique identifier ensuring that the system does not change
-during write operations to the INDEX of the database.
-
-```go
-package main
-
-import (
-  `fmt`
-  `os`
-  `encoding/json`
-
-  ai `github.com/andreimerlescu/go-apario-identifier`
-)
-
-func main() {
-  dir1, _ := os.MkdirTemp("", "db1")
-  dir2, _ := os.MkdirTemp("", "db2")
-
-  id1, _ := ai.NewID(dir1, 6)
-
-  for {
-    select {
-      case <-time.Tick(30*time.Second):
-        fmt.Printf("ran out of time")
-        return
-      case <-time.Tick(10*time.Second):
-        ai.DatabaseSemaphores[dir1].Acquire() // this will succeed
-        id2, _ := ai.NewID(dir1, 6) // this will fail because ai.NewID uses DatabaseSemaphores
-        ai.DatabaseSemaphores[dir1].Release()
-    }
-  }
-
-  usersDb, _ := os.MkdirTemp("", "users.db")
-  username := "admin"
-  identifier, _ := ai.NewID(usersDb, 6)
-  type account struct {
-    Username string
-    Identifier string
-  }
-  user := &account{
-    Username: username,
-    Identifier: identifier.String()
-  }
-  user_bytes, bytes_err := json.Marshal(user)
-  if bytes_err != nil {
-    panic(bytes_err)
-  }
-  path := filepath.Join(usersDb, identifier.Path(), "account.json")
-  identifier.Lock()
-  writeErr := os.WriteFile(path, user_bytes, 0600)
-  identifier.Unlock()
-  if writeErr != nil {
-    panic(writeErr)
-  }
-
-}
-
-```
+In addition to using an incrementer database, a non-incremental database can be used that will not permit the use of
+`.NextID`. Finally, you can use Valet with a context, so if you need to ensure that for/select statements properly exit
+when the main context of your application cancels, then use `NewValetWithContext(ctx, db)`.

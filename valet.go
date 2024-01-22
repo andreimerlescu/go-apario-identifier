@@ -1,24 +1,48 @@
 package go_apario_identifier
 
 import (
+	`context`
 	`errors`
 	`fmt`
 	`log`
+	`os`
+	`path/filepath`
+	`strconv`
 	`sync`
 
 	sema `github.com/andreimerlescu/go-sema`
 )
 
 type Valet struct {
+	ctx       context.Context
 	Databases map[string]*Cache `json:"-"`
 	mu        *sync.RWMutex
 	lim       int
 }
 
-func NewValet(databasePath string) *Valet {
+func NewValetWithContext(ctx context.Context, databasePath string) *Valet {
 	return &Valet{
+		ctx: ctx,
 		Databases: map[string]*Cache{
 			databasePath: {
+				ctx:        context.WithoutCancel(ctx),
+				Path:       databasePath,
+				Mutexes:    make(map[string]*sync.RWMutex),
+				Semaphores: make(map[string]sema.Semaphore),
+			},
+		},
+		mu: &sync.RWMutex{},
+	}
+}
+
+func NewValet(databasePath string) *Valet {
+	ctx := context.Background()
+	return &Valet{
+		ctx: ctx,
+		Databases: map[string]*Cache{
+			databasePath: {
+				ctx:        context.WithoutCancel(ctx),
+				Path:       databasePath,
 				Mutexes:    make(map[string]*sync.RWMutex),
 				Semaphores: make(map[string]sema.Semaphore),
 			},
@@ -125,6 +149,119 @@ func (v *Valet) SafetyCheck() {
 	}
 }
 
+func (v *Valet) NewCountableDatabase(databasePath string) error {
+	mkdirErr := os.MkdirAll(databasePath, 0700)
+	if mkdirErr != nil {
+		return mkdirErr
+	}
+
+	firstId := int64(1)
+	lastIdPath := filepath.Join(databasePath, ".lastid")
+	idStr := fmt.Sprintf("%d", firstId)
+	writeErr := os.WriteFile(lastIdPath, []byte(idStr), 0600)
+	if writeErr != nil {
+		return writeErr
+	}
+	return nil
+}
+
+func (v *Valet) IsCountableDatabase(databasePath string) bool {
+	_, lastIdErr := v.LastID(databasePath)
+	return lastIdErr == nil
+}
+
+func (v *Valet) LastID(databasePath string) (*Identifier, error) {
+	// assume that database is using incremental base36 for its storage needs
+	lastIdPath := filepath.Join(databasePath, ".lastid")
+	c, cacheErr := v.GetCache(databasePath)
+	if cacheErr != nil {
+		// failed to get cache for valet database
+		return nil, errors.New("no such cache exists for databasePath")
+	}
+
+	if !c.PathExists(lastIdPath) {
+		return nil, errors.New("no .lastid found in databasePath")
+	}
+
+	lockedThenBytes, readErr := os.ReadFile(lastIdPath)
+	if readErr != nil {
+		return v.NewID(databasePath, 6)
+	}
+	thenStr := string(lockedThenBytes)
+	lastId, convErr := strconv.Atoi(thenStr)
+	if convErr != nil {
+		return v.NewID(databasePath, 6)
+	}
+
+	identifier, identifierErr := IntegerFragment(lastId).ToIdentifier()
+	if identifierErr != nil {
+		// invalid identifier generated
+		return v.NewID(databasePath, 6)
+	}
+
+	return identifier, nil
+}
+
+func (v *Valet) NextID(databasePath string) (*Identifier, error) {
+	if !v.IsCountableDatabase(databasePath) {
+		return v.NewID(databasePath, 6)
+	}
+
+	// assume that database is using incremental base36 for its storage needs
+	lastIdPath := filepath.Join(databasePath, ".lastid")
+	c, cacheErr := v.GetCache(databasePath)
+	if cacheErr != nil {
+		// failed to get cache for valet database
+		return v.NewID(databasePath, 6)
+	}
+
+	if !c.PathExists(lastIdPath) {
+		return v.NewID(databasePath, 6)
+	}
+
+	lockedThenBytes, readErr := os.ReadFile(lastIdPath)
+	if readErr != nil {
+		return v.NewID(databasePath, 6)
+	}
+	thenStr := string(lockedThenBytes)
+	lastId, convErr := strconv.Atoi(thenStr)
+	if convErr != nil {
+		return v.NewID(databasePath, 6)
+	}
+
+	nextId := lastId + 1
+	nextIdStr := fmt.Sprintf("%d", nextId)
+	writeErr := os.WriteFile(lastIdPath, []byte(nextIdStr), 0600)
+	if writeErr != nil {
+		// failed to write to the file
+		return v.NewID(databasePath, 6)
+	}
+
+	identifier, identifierErr := IntegerFragment(nextId).ToIdentifier()
+	if identifierErr != nil {
+		// invalid identifier generated
+		return v.NewID(databasePath, 6)
+	}
+
+	_, identifierDir, idErr := c.EnsureIdentifierDirectory(identifier.String())
+	if idErr != nil {
+		return nil, idErr
+	}
+
+	identifierPath := filepath.Join(identifierDir, ".identifier")
+	idPathLockErr := c.LockIdentifier(identifier.String())
+	defer c.UnlockIdentifier(identifier.String())
+	if idPathLockErr != nil {
+		return v.NewID(databasePath, 6)
+	}
+	writeErr = os.WriteFile(identifierPath, []byte(identifier.String()), 0600)
+	if writeErr != nil {
+		return v.NewID(databasePath, 6)
+	}
+
+	return identifier, nil
+}
+
 func (v *Valet) NewID(databasePath string, length int) (*Identifier, error) {
 	c, cErr := v.GetCache(databasePath)
 	if cErr != nil {
@@ -134,8 +271,8 @@ func (v *Valet) NewID(databasePath string, length int) (*Identifier, error) {
 	if idErr != nil {
 		return nil, idErr
 	}
-	s := c.S(id.String())
-	m := c.M(id.String())
+	s := c.Semaphore(id.String())
+	m := c.Mutex(id.String())
 
 	// perform a flush on the semaphore and mutex wrapped with the semaphore first
 	s.Acquire()
@@ -168,4 +305,8 @@ func (v *Valet) Scan() error {
 	}
 	wg.Wait()  // wait for scan to complete
 	return nil // no error
+}
+
+func (v *Valet) PathExists(path string) bool {
+	return pathExists(path)
 }

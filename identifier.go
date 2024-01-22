@@ -2,11 +2,12 @@ package go_apario_identifier
 
 import (
 	`fmt`
+	`strings`
 )
 
 type Identifier struct {
-	Year int16  `json:"y"`
-	Code string `json:"c"`
+	Year     int16    `json:"y"`
+	Fragment Fragment `json:"f"`
 }
 
 func (i *Identifier) Identifier() *Identifier {
@@ -22,5 +23,5 @@ func (i *Identifier) Path() string {
 }
 
 func (i *Identifier) String() string {
-	return fmt.Sprintf("%04d%s", i.Year, i.Code)
+	return fmt.Sprintf("%04d%s", i.Year, strings.ToUpper(string(i.Fragment)))
 }
