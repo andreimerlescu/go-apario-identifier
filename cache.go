@@ -2,6 +2,7 @@ package go_apario_identifier
 
 import (
 	`context`
+	`encoding/json`
 	`errors`
 	`fmt`
 	`io/fs`
@@ -28,6 +29,77 @@ type Cache struct {
 
 func (c *Cache) PathExists(path string) bool {
 	return pathExists(path)
+}
+
+func (c *Cache) SafeLoadBytes(path string) ([]byte, error) {
+	c.EnsureIdentifierMutex(path)
+	c.Mutex(path).RLock()
+	defer func() {
+		// unlock the read request on the path
+		c.Mutex(path).RUnlock()
+		// read the property safely
+		c.muMu.RLock()
+		count := len(c.Mutexes)
+		c.muMu.RUnlock()
+		// auto-cleanup
+		if count > 369 {
+			c.muMu.Lock()
+			delete(c.Mutexes, path)
+			c.muMu.Unlock()
+		}
+	}()
+	return os.ReadFile(path)
+}
+
+func (c *Cache) removeMutex(path string) {
+	c.muMu.Lock()
+	_, exists := c.Mutexes[path]
+	if !exists {
+		return
+	}
+	delete(c.Mutexes, path)
+	c.muMu.Unlock()
+}
+
+func (c *Cache) removeSemaphore(path string) {
+	c.muSe.Lock()
+	_, exists := c.Semaphores[path]
+	if !exists {
+		return
+	}
+	delete(c.Semaphores, path)
+	c.muSe.Unlock()
+}
+
+func (c *Cache) SafeWriteBytes(path string, bytes []byte) error {
+	c.EnsureIdentifierMutex(path)
+	c.Mutex(path).Lock()
+	defer func() {
+		c.Mutex(path).Unlock()
+		// read the property safely
+		c.muMu.RLock()
+		count := len(c.Mutexes)
+		c.muMu.RUnlock()
+		// auto-cleanup
+		if count > 369 {
+			c.removeMutex(path)
+		}
+	}()
+	return os.WriteFile(path, bytes, 0600)
+}
+
+func (c *Cache) LoadIdentifierFileInto(identifier string, filename string, receiver any) (any, error) {
+	c.EnsureIdentifier(identifier)
+	path := filepath.Join(c.Path, IdentifierPath(identifier), filename)
+	bytes, loadErr := c.SafeLoadBytes(path)
+	if loadErr != nil {
+		return nil, loadErr
+	}
+	jsonErr := json.Unmarshal(bytes, &receiver)
+	if jsonErr != nil {
+		return nil, jsonErr
+	}
+	return receiver, nil
 }
 
 // LockIdentifier will place a .locked file inside of the directory that belongs to the identifier argument

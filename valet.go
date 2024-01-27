@@ -4,25 +4,31 @@ import (
 	`context`
 	`errors`
 	`fmt`
+	`io`
 	`log`
+	`net/http`
 	`os`
 	`path/filepath`
 	`strconv`
 	`sync`
+	`time`
 
 	sema `github.com/andreimerlescu/go-sema`
 )
 
 type Valet struct {
-	ctx       context.Context
-	Databases map[string]*Cache `json:"-"`
-	mu        *sync.RWMutex
-	lim       int
+	ctx                  context.Context
+	InitialPath          string
+	RemoteTimeoutSeconds time.Duration
+	Databases            map[string]*Cache `json:"-"`
+	mu                   *sync.RWMutex
+	lim                  int
 }
 
 func NewValetWithContext(ctx context.Context, databasePath string) *Valet {
 	return &Valet{
-		ctx: ctx,
+		ctx:         ctx,
+		InitialPath: databasePath,
 		Databases: map[string]*Cache{
 			databasePath: {
 				ctx:        context.WithoutCancel(ctx),
@@ -38,7 +44,8 @@ func NewValetWithContext(ctx context.Context, databasePath string) *Valet {
 func NewValet(databasePath string) *Valet {
 	ctx := context.Background()
 	return &Valet{
-		ctx: ctx,
+		ctx:         ctx,
+		InitialPath: databasePath,
 		Databases: map[string]*Cache{
 			databasePath: {
 				ctx:        context.WithoutCancel(ctx),
@@ -49,6 +56,38 @@ func NewValet(databasePath string) *Valet {
 		},
 		mu: &sync.RWMutex{},
 	}
+}
+
+func (v *Valet) GetRemotePathFileBytes(path string, ctx context.Context, cancel context.CancelFunc) []byte {
+	defer func() {
+		r := recover()
+		if r != nil {
+			log.Printf("GetRemotePathFileBytes recovered from err %v", r)
+		}
+	}()
+	go func() {
+		ctx.Done()
+		cancel()
+		return
+	}()
+	resp, err := http.Get(path)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return []byte{}
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Printf("GetRemotePathFileBytes received err %v", err)
+		}
+	}(resp.Body)
+
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		log.Printf("GetRemotePathFileBytes received err %v", readErr)
+		return []byte{}
+	}
+	return body
 }
 
 func (v *Valet) GetCache(databasePrefix string) (*Cache, error) {
@@ -147,6 +186,11 @@ func (v *Valet) SafetyCheck() {
 	if v.lim == 0 {
 		v.lim = 3
 	}
+}
+
+func (v *Valet) NewCountableDatabaseWithContext(ctx context.Context, databasePath string) error {
+	v.ctx = ctx
+	return v.NewCountableDatabase(databasePath)
 }
 
 func (v *Valet) NewCountableDatabase(databasePath string) error {

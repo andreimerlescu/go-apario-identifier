@@ -63,4 +63,5 @@ func TestNewValet(t *testing.T) {
 		return
 	}
 	cache.UnlockIdentifier(id.String())
+
 }
