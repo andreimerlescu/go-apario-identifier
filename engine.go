@@ -26,13 +26,13 @@ func newToken(length int, attempts int) (*Identifier, error) {
 	for {
 		token := make([]byte, length)
 		for i := range token {
-			m := big.NewInt(int64(len(charset)))
+			m := big.NewInt(int64(len(IdentifierCharset)))
 			randIndex, err := rand.Int(rand.Reader, m)
 			if err != nil {
 				log.Printf("failed to generate random number: %v", err)
 				continue
 			}
-			token[i] = charset[randIndex.Int64()]
+			token[i] = IdentifierCharset[randIndex.Int64()]
 		}
 
 		id := fmt.Sprintf("%4d%v", time.Now().UTC().Year(), string(token))

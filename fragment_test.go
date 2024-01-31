@@ -150,3 +150,24 @@ func TestNewFragment(t *testing.T) {
 		})
 	}
 }
+
+func TestFragment_Path(t *testing.T) {
+	tests := []struct {
+		name string
+		f    Fragment
+		want string
+	}{
+		{
+			name: "test 1",
+			f:    []rune("ABCDEFGHI"),
+			want: "A/B/CD/EF/GHI",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.f.Path(); got != tt.want {
+				t.Errorf("Path() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -68,7 +68,7 @@ func IdentifierPath(identifier string) string {
 			continue
 		}
 
-		r := fibonacci(depth)
+		r := rFibonacci(depth)
 		if r > remaining {
 			r = remaining
 		}

@@ -11,14 +11,51 @@ var (
 )
 
 const (
-	charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	IdentifierCharset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 )
 
+var cachedFibonacci = make(map[int]int) // depth=value
+
 func fibonacci(n int) int {
+	if n > 33 {
+		n = 33
+	}
+	value, ok := cachedFibonacci[n]
+	if !ok {
+		buildFibonacciCache()
+		return fibonacci(n)
+	}
+
+	if ok {
+		return value
+	}
+	return 0
+}
+
+func buildFibonacciCache() {
+	if cachedFibonacci == nil {
+		cachedFibonacci = make(map[int]int)
+	}
+	if len(cachedFibonacci) == 33 {
+		return
+	}
+	if len(cachedFibonacci) > 33 {
+		for k, _ := range cachedFibonacci {
+			if k > 33 {
+				delete(cachedFibonacci, k)
+			}
+		}
+	}
+	for i := 0; i < 33; i++ {
+		cachedFibonacci[i] = rFibonacci(i)
+	}
+}
+
+func rFibonacci(n int) int {
 	if n <= 1 {
 		return n
 	}
-	return fibonacci(n-1) + fibonacci(n-2)
+	return rFibonacci(n-1) + rFibonacci(n-2)
 }
 
 // reverseString reverses a string.
