@@ -38,6 +38,9 @@ type Version struct {
 }
 
 func (v *Version) String() string {
+	if v == nil {
+		return fmt.Sprintf("v0.0.1")
+	}
 	return fmt.Sprintf("v%d.%d.%d", v.Major, v.Minor, v.Patch)
 }
 

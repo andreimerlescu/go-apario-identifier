@@ -16,7 +16,6 @@ import (
 	`strings`
 	`sync/atomic`
 	`time`
-	`unicode`
 )
 
 type Identifier struct {
@@ -361,13 +360,6 @@ func (i *Identifier) UUID() string {
 				break
 			}
 			ivv := iv[v]
-			var ivvb []byte
-			if !unicode.IsDigit(ivv) {
-				ivvb = []byte(string(ivv))
-				s.Write(ivvb)
-				continue
-			}
-
 			sifq := strconv.Itoa(int(ivv))
 			if v+1 < len(iv) {
 				sifq += `.`

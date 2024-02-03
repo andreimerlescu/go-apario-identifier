@@ -128,7 +128,29 @@ func TestIdentifier_UUID(t *testing.T) {
 		want   string
 	}{
 		{
-			name: "UUID 1",
+			name: "UUID russian domain",
+			fields: fields{
+				Instance:  []rune("демонстрируют.com"),
+				Concierge: []rune("valet"),
+				Table:     []rune("documents"),
+				Year:      2024,
+				Fragment:  []rune("ABCDEFGHI"),
+			},
+			want: "1076.1077.1084.1086.1085.1089.1090.1088.1080.1088.1091.1102.1090.46.99.111.109-118.97.108.101.116-100.111.99.117.109.101.110.116.115-2024-65.66.67.68.69.70.71.72.73-118.48.46.48.46.49",
+		},
+		{
+			name: "UUID chinese domain",
+			fields: fields{
+				Instance:  []rune("类型的函数.hk"),
+				Concierge: []rune("valet"),
+				Table:     []rune("documents"),
+				Year:      2024,
+				Fragment:  []rune("ABCDEFGHI"),
+			},
+			want: "31867.22411.30340.20989.25968.46.104.107-118.97.108.101.116-100.111.99.117.109.101.110.116.115-2024-65.66.67.68.69.70.71.72.73-118.48.46.48.46.49",
+		},
+		{
+			name: "UUID english domain",
 			fields: fields{
 				Instance:  []rune("idoread.com"),
 				Concierge: []rune("valet"),
@@ -139,7 +161,7 @@ func TestIdentifier_UUID(t *testing.T) {
 			want: "105.100.111.114.101.97.100.46.99.111.109-118.97.108.101.116-100.111.99.117.109.101.110.116.115-2024-65.66.67.68.69.70.71.72.73",
 		},
 		{
-			name: "UUID 2",
+			name: "UUID another english domain",
 			fields: fields{
 				Instance:  []rune("docs.projectminnesota.com"),
 				Concierge: []rune("valet"),
@@ -150,7 +172,7 @@ func TestIdentifier_UUID(t *testing.T) {
 			want: "100.111.99.115.46.112.114.111.106.101.99.116.109.105.110.110.101.115.111.116.97.46.99.111.109-118.97.108.101.116-100.111.99.117.109.101.110.116.115-2024-65.76.75.72.68.65",
 		},
 		{
-			name: "UUID 3",
+			name: "UUID last english domain",
 			fields: fields{
 				Instance:  []rune("projectapario.com"),
 				Concierge: []rune("valet"),
